@@ -1,0 +1,283 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum Role {
+  USER
+  ADMIN
+}
+
+enum PayoutStatus {
+  NONE // seller hasn't added bank details
+  PENDING // linked account created, awaiting provider verification
+  ACTIVE // can receive payouts
+  FAILED
+}
+
+model User {
+  id               String       @id @default(cuid())
+  phone            String       @unique // E.164, e.g. +919812345678 — never shown to other users
+  name             String?
+  city             String?
+  role             Role         @default(USER)
+  bannedAt         DateTime?
+  idVerified       Boolean      @default(false)
+  strikes          Int          @default(0)
+  ratingSum        Int          @default(0)
+  ratingCount      Int          @default(0)
+  completedSales   Int          @default(0)
+  completedBuys    Int          @default(0)
+  rejectionsAsBuyer Int         @default(0)
+  noShowsAsBuyer   Int          @default(0)
+  noShowsAsSeller  Int          @default(0)
+  payoutStatus     PayoutStatus @default(NONE)
+  payoutAccountId  String? // provider linked-account id (e.g. Razorpay acc_xxx)
+  payoutAccountLast4 String?
+  createdAt        DateTime     @default(now())
+  updatedAt        DateTime     @updatedAt
+
+  sessions        Session[]
+  listings        Listing[]
+  buyerOrders     Order[]       @relation("BuyerOrders")
+  sellerOrders    Order[]       @relation("SellerOrders")
+  conversationsAsBuyer Conversation[] @relation("ConvBuyer")
+  conversationsAsSeller Conversation[] @relation("ConvSeller")
+  messages        Message[]
+  reviewsGiven    Review[]      @relation("ReviewAuthor")
+  reviewsReceived Review[]      @relation("ReviewTarget")
+  reports         Report[]
+}
+
+model Session {
+  id        String   @id @default(cuid())
+  tokenHash String   @unique
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+
+  @@index([userId])
+}
+
+model OtpCode {
+  id        String   @id @default(cuid())
+  phone     String
+  codeHash  String
+  attempts  Int      @default(0)
+  expiresAt DateTime
+  consumedAt DateTime?
+  createdAt DateTime @default(now())
+
+  @@index([phone, createdAt])
+}
+
+// Generic fixed-window rate limiter storage
+model RateLimit {
+  key       String   @id
+  count     Int
+  resetAt   DateTime
+}
+
+enum ListingStatus {
+  ACTIVE
+  RESERVED
+  SOLD
+  REMOVED
+}
+
+enum Condition {
+  NEW
+  LIKE_NEW
+  GOOD
+  FAIR
+  FOR_PARTS
+}
+
+model Listing {
+  id          String        @id @default(cuid())
+  sellerId    String
+  seller      User          @relation(fields: [sellerId], references: [id])
+  title       String
+  description String
+  category    String
+  condition   Condition
+  pricePaise  Int
+  images      String[] // storage keys
+  city        String
+  area        String // locality name shown publicly
+  // Approximate location only (rounded to ~100m on write)
+  lat         Float
+  lng         Float
+  status      ListingStatus @default(ACTIVE)
+  soldOffPlatform Boolean   @default(false)
+  createdAt   DateTime      @default(now())
+  updatedAt   DateTime      @updatedAt
+
+  orders        Order[]
+  conversations Conversation[]
+  reports       Report[]
+
+  @@index([status, lat, lng])
+  @@index([status, city])
+  @@index([sellerId])
+}
+
+model Conversation {
+  id        String   @id @default(cuid())
+  listingId String
+  listing   Listing  @relation(fields: [listingId], references: [id])
+  buyerId   String
+  buyer     User     @relation("ConvBuyer", fields: [buyerId], references: [id])
+  sellerId  String
+  seller    User     @relation("ConvSeller", fields: [sellerId], references: [id])
+  lastMessageAt DateTime @default(now())
+  createdAt DateTime @default(now())
+
+  messages Message[]
+
+  @@unique([listingId, buyerId])
+  @@index([buyerId, lastMessageAt])
+  @@index([sellerId, lastMessageAt])
+}
+
+model Message {
+  id             String       @id @default(cuid())
+  conversationId String
+  conversation   Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  senderId       String
+  sender         User         @relation(fields: [senderId], references: [id])
+  body           String // already masked
+  masked         Boolean      @default(false) // true if contact info was redacted
+  system         Boolean      @default(false)
+  createdAt      DateTime     @default(now())
+
+  @@index([conversationId, createdAt])
+}
+
+enum OrderStatus {
+  PENDING_PAYMENT // reservation created, waiting for buyer's payment (expires fast)
+  PAID // money held in escrow, item locked, meetup pending
+  COMPLETED // buyer handed over code -> seller paid
+  REJECTED // buyer inspected & rejected -> refunded
+  CANCELLED // cancelled before meetup (by either party) -> refunded
+  BUYER_NO_SHOW // seller reported, buyer did not contest -> partial refund, compensation to seller
+  SELLER_NO_SHOW // buyer reported -> full refund, seller strike
+  EXPIRED // PENDING_PAYMENT timed out, or PAID passed deadline with no action -> refunded
+  DISPUTED // waiting for admin
+}
+
+model Order {
+  id                 String      @id @default(cuid())
+  listingId          String
+  listing            Listing     @relation(fields: [listingId], references: [id])
+  buyerId            String
+  buyer              User        @relation("BuyerOrders", fields: [buyerId], references: [id])
+  sellerId           String
+  seller             User        @relation("SellerOrders", fields: [sellerId], references: [id])
+  status             OrderStatus @default(PENDING_PAYMENT)
+
+  pricePaise         Int
+  feePaise           Int // platform commission (charged to seller)
+  sellerPayoutPaise  Int // pricePaise - feePaise
+  compensationPaise  Int         @default(0) // paid to seller on buyer no-show
+  refundPaise        Int         @default(0) // amount owed back to buyer once order closes
+  transferPaise      Int         @default(0) // amount owed to seller once order closes
+  settledAt          DateTime? // all money movements for this order are done
+  settlementError    String?
+  settleLockUntil    DateTime? // prevents two workers moving money for the same order concurrently
+
+  // Payment provider references
+  providerOrderId    String?     @unique
+  providerPaymentId  String?     @unique
+  providerTransferId String?
+  providerRefundId   String?
+
+  // Handover
+  handoverCodeHash   String?
+  handoverCodeEnc    String? // AES-GCM encrypted so the buyer can view it again
+  codeAttempts       Int         @default(0)
+  codeLockedUntil    DateTime?
+
+  meetupPlace        String?
+  meetupAt           DateTime?
+
+  paymentExpiresAt   DateTime
+  deadlineAt         DateTime? // set when PAID; meetup must complete before this
+
+  noShowReportedBy   String? // "BUYER" | "SELLER"
+  noShowReportedAt   DateTime?
+  rejectReason       String?
+  cancelReason       String?
+  disputeReason      String?
+  adminNote          String?
+
+  paidAt             DateTime?
+  completedAt        DateTime?
+  closedAt           DateTime?
+  createdAt          DateTime    @default(now())
+  updatedAt          DateTime    @updatedAt
+
+  events  OrderEvent[]
+  reviews Review[]
+
+  @@index([buyerId, createdAt])
+  @@index([sellerId, createdAt])
+  @@index([status, paymentExpiresAt])
+  @@index([status, deadlineAt])
+  @@index([listingId])
+  @@index([settledAt, closedAt])
+}
+
+// Append-only audit trail of everything that happens to an order (evidence for disputes)
+model OrderEvent {
+  id        String   @id @default(cuid())
+  orderId   String
+  order     Order    @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  actorId   String? // null = system
+  type      String
+  data      Json?
+  createdAt DateTime @default(now())
+
+  @@index([orderId, createdAt])
+}
+
+model Review {
+  id        String   @id @default(cuid())
+  orderId   String
+  order     Order    @relation(fields: [orderId], references: [id])
+  authorId  String
+  author    User     @relation("ReviewAuthor", fields: [authorId], references: [id])
+  targetId  String
+  target    User     @relation("ReviewTarget", fields: [targetId], references: [id])
+  rating    Int
+  comment   String?
+  createdAt DateTime @default(now())
+
+  @@unique([orderId, authorId])
+  @@index([targetId, createdAt])
+}
+
+model Report {
+  id         String   @id @default(cuid())
+  reporterId String
+  reporter   User     @relation(fields: [reporterId], references: [id])
+  listingId  String?
+  listing    Listing? @relation(fields: [listingId], references: [id])
+  reason     String
+  resolvedAt DateTime?
+  createdAt  DateTime @default(now())
+
+  @@index([resolvedAt, createdAt])
+}
+
+// Idempotency for payment webhooks
+model WebhookEvent {
+  id         String   @id // provider event id
+  type       String
+  receivedAt DateTime @default(now())
+}

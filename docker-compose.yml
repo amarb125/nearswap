@@ -1,0 +1,39 @@
+# Production-like stack: app + Postgres + a tiny cron runner.
+# Usage: cp .env.example .env  (fill in real keys)  &&  docker compose up -d --build
+services:
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: nearswap
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-nearswap}
+      POSTGRES_DB: nearswap
+    volumes: [pgdata:/var/lib/postgresql/data]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U nearswap"]
+      interval: 5s
+      retries: 10
+
+  app:
+    build: .
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      DATABASE_URL: postgresql://nearswap:${POSTGRES_PASSWORD:-nearswap}@db:5432/nearswap
+    ports: ["3000:3000"]
+    volumes: [uploads:/app/uploads]
+    depends_on:
+      db: { condition: service_healthy }
+
+  # Runs escrow maintenance every 5 minutes: expires unpaid reservations, finalizes no-shows,
+  # refunds missed deadlines, retries failed refunds/payouts.
+  cron:
+    image: curlimages/curl:8.10.1
+    restart: unless-stopped
+    env_file: .env
+    entrypoint: ["sh", "-c", "while true; do curl -fsS -X POST -H \"Authorization: Bearer $$CRON_SECRET\" http://app:3000/api/cron || true; sleep 300; done"]
+    depends_on: [app]
+
+volumes:
+  pgdata:
+  uploads:
