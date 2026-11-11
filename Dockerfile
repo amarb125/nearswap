@@ -1,5 +1,5 @@
 # ---- deps ----
-FROM node:22-bookworm-slim AS deps
+FROM node:26-bookworm-slim AS deps
 WORKDIR /app
 RUN apt-get update && apt-get install -y --no-install-recommends openssl ca-certificates && rm -rf /var/lib/apt/lists/*
 COPY package.json package-lock.json prisma.config.ts ./
@@ -7,7 +7,7 @@ COPY prisma ./prisma
 RUN npm ci
 
 # ---- migrator: just the Prisma CLI, used at boot to apply migrations ----
-FROM node:22-bookworm-slim AS migrator
+FROM node:26-bookworm-slim AS migrator
 WORKDIR /migrate
 COPY package.json package-lock.json ./
 RUN PRISMA_VER=$(node -p "require('./package-lock.json').packages['node_modules/prisma'].version") \
@@ -32,7 +32,7 @@ RUN npx prisma generate && npx next build \
      fi
 
 # ---- runtime ----
-FROM node:22-bookworm-slim AS runner
+FROM node:26-bookworm-slim AS runner
 WORKDIR /app
 RUN apt-get update && apt-get install -y --no-install-recommends openssl ca-certificates && rm -rf /var/lib/apt/lists/* \
   && groupadd -r app && useradd -r -g app app && mkdir -p /app/uploads && chown app:app /app/uploads
