@@ -33,8 +33,8 @@ max ₹500, all configurable).
 
 ## Tech
 
-- **Next.js 15** (App Router), TypeScript, Tailwind. Mobile-first PWA. The whole backend is a JSON API under `/api`, so a native app can reuse it later.
-- **PostgreSQL + Prisma**. Nearby search uses an indexed bounding box plus a haversine distance, so PostGIS isn't required.
+- **Next.js 16** (App Router), TypeScript, Tailwind. Mobile-first PWA. The whole backend is a JSON API under `/api`, so a native app can reuse it later.
+- **PostgreSQL + Prisma 7** (node-postgres driver adapter; connection settings live in `prisma.config.ts`). Nearby search uses an indexed bounding box plus a haversine distance, so PostGIS isn't required.
 - **Razorpay Route** for escrow: the buyer pays into the platform's Razorpay account. When the handover completes, a *Transfer* goes to the seller's Linked Account. When the order is rejected or cancelled, the payment is *Refunded*. A `mock` provider exists for local development and is refused in production.
 - **Phone OTP login** via MSG91 (India, DLT) or Twilio, with database-backed sessions (httpOnly cookies).
 - **Images** go to local disk or any S3-compatible store (AWS S3, Cloudflare R2). Files are checked by magic bytes and capped at 5 MB.

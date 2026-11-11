@@ -6,7 +6,7 @@ services:
     restart: unless-stopped
     environment:
       POSTGRES_USER: nearswap
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-nearswap}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}
       POSTGRES_DB: nearswap
     volumes: [pgdata:/var/lib/postgresql/data]
     healthcheck:
@@ -19,7 +19,7 @@ services:
     restart: unless-stopped
     env_file: .env
     environment:
-      DATABASE_URL: postgresql://nearswap:${POSTGRES_PASSWORD:-nearswap}@db:5432/nearswap
+      DATABASE_URL: postgresql://nearswap:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}@db:5432/nearswap
     ports: ["3000:3000"]
     volumes: [uploads:/app/uploads]
     depends_on:
