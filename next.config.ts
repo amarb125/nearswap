@@ -27,7 +27,7 @@ const securityHeaders = [
 const config: NextConfig = {
   output: "standalone",
   poweredByHeader: false,
-  serverExternalPackages: ["@prisma/client"],
+  serverExternalPackages: ["@prisma/client", "@sentry/node"],
   async headers() {
     return [{ source: "/(.*)", headers: securityHeaders }];
   },

@@ -1,5 +1,6 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { ZodError, type ZodTypeAny, type z } from "zod";
+import { captureError } from "@/lib/monitoring";
 
 export class HttpError extends Error {
   constructor(public status: number, message: string, public code?: string) {
@@ -28,6 +29,7 @@ export function route<C = unknown>(fn: Handler<C>, opts: { skipOriginCheck?: boo
       if (e instanceof ZodError)
         return NextResponse.json({ error: e.issues[0]?.message ?? "Invalid input", issues: e.issues }, { status: 400 });
       console.error("[api error]", req.method, req.nextUrl.pathname, e);
+      captureError(e, { method: req.method, path: req.nextUrl.pathname });
       return NextResponse.json({ error: "Something went wrong" }, { status: 500 });
     }
   };

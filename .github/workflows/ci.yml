@@ -1,0 +1,69 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: nearswap
+          POSTGRES_PASSWORD: nearswap
+          POSTGRES_DB: nearswap_test
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U nearswap"
+          --health-interval 5s --health-timeout 5s --health-retries 10
+    env:
+      DATABASE_URL: postgresql://nearswap:nearswap@localhost:5432/nearswap_test
+      TEST_DATABASE_URL: postgresql://nearswap:nearswap@localhost:5432/nearswap_test
+      NEXT_TELEMETRY_DISABLED: "1"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npx prisma generate
+      - run: npm run typecheck
+      - run: npm test
+      - run: npm audit --omit=dev --audit-level=high
+      - run: npm run build
+
+  docker:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - name: Build production image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: false
+          tags: nearswap:ci
+          load: true
+      - name: Image refuses to start with dev-only providers
+        run: |
+          set +e
+          docker run --rm -e NODE_ENV=production -e DATABASE_URL=postgresql://x:x@127.0.0.1:1/x \
+            -e APP_SECRET=ci-secret-ci-secret-ci-secret-ci-secret -e CRON_SECRET=ci-cron-secret-123 \
+            -e PAYMENT_PROVIDER=mock -e SMS_PROVIDER=console \
+            --entrypoint node nearswap:ci server.js > out.txt 2>&1 &
+          pid=$!
+          for i in $(seq 1 30); do kill -0 $pid 2>/dev/null || break; sleep 1; done
+          wait $pid; code=$?
+          cat out.txt
+          grep -q "Refusing to start" out.txt && [ "$code" -ne 0 ] || { echo "expected the server to refuse and exit"; exit 1; }

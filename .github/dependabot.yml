@@ -1,0 +1,18 @@
+version: 2
+updates:
+  - package-ecosystem: npm
+    directory: /
+    schedule: { interval: weekly }
+    open-pull-requests-limit: 10
+    groups:
+      # Minor/patch bumps land as one PR; majors (breaking) get their own.
+      minor-and-patch:
+        update-types: [minor, patch]
+      prisma:
+        patterns: ["prisma", "@prisma/*"]
+  - package-ecosystem: docker
+    directory: /
+    schedule: { interval: weekly }
+  - package-ecosystem: github-actions
+    directory: /
+    schedule: { interval: weekly }

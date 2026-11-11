@@ -280,3 +280,12 @@ model WebhookEvent {
   type       String
   receivedAt DateTime @default(now())
 }
+
+/// Last outcome of scheduled jobs (e.g. "cron"), so /api/health/cron can alert when they stop running.
+model JobRun {
+  name          String    @id
+  lastSuccessAt DateTime?
+  lastErrorAt   DateTime?
+  lastError     String?
+  updatedAt     DateTime  @updatedAt
+}

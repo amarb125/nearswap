@@ -8,6 +8,11 @@ const schema = z.object({
   // 32+ char secret used for HMAC (OTP/handover code hashing) and AES key derivation
   APP_SECRET: z.string().min(32),
   CRON_SECRET: z.string().min(16).optional(),
+  // /api/health/cron reports unhealthy if /api/cron hasn't succeeded within this many minutes
+  CRON_STALE_MINUTES: z.coerce.number().int().min(1).default(15),
+  // Optional: Sentry DSN for server-side error tracking (disabled when empty)
+  SENTRY_DSN: z.string().optional(),
+  SENTRY_ENVIRONMENT: z.string().optional(),
 
   // Commission: basis points (500 = 5%), min and max in paise
   FEE_BPS: z.coerce.number().int().min(0).max(5000).default(500),
